@@ -1,0 +1,84 @@
+name: Deploy studio UI to GitHub Pages
+
+# Publishes the *static* studio interface to GitHub Pages.
+#
+# One-time setup (Settings → Pages → "Build and deployment" → Source):
+#     choose "GitHub Actions"  — not "Deploy from a branch".
+# Until that is set, the "Configure Pages" step below fails on purpose with an
+# actionable message instead of deploying nothing. Enabling a Pages site needs
+# repository-admin rights, so it cannot be granted by this workflow's token.
+#
+# GitHub Pages cannot run the FastAPI backend (uvicorn, XTTS-v2, Demucs,
+# faster-whisper, ffmpeg), so this deploys the UI only. To connect it to a real
+# backend, set the repository variable VOX_API_BASE (Settings → Secrets and
+# variables → Actions → Variables) to the backend's public origin, e.g.
+# https://my-voxstudio.fly.dev — the page will then send its API calls there.
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-flight deployment finish rather than cancelling it.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Matches the runtime the export is developed and tested on.
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install build tooling
+        run: npm ci || npm install
+
+      - name: Compile Tailwind and vendor browser libraries
+        run: npm run build
+
+      - name: Export the static site
+        env:
+          VOX_API_BASE: ${{ vars.VOX_API_BASE }}
+        run: npm run build:pages
+
+      - name: Verify the export is a complete site
+        run: |
+          test -f pages/index.html
+          test -f pages/.nojekyll
+          test -f pages/static/css/tailwind.css
+          test -f pages/static/js/studio.js
+          test -f pages/static/vendor/alpine.min.js
+          ! grep -q '{{\|{%' pages/index.html
+          echo "Static export verified: $(du -sh pages | cut -f1)"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,278 @@
+/* ==========================================================================
+   VoxStudio — Tailwind source
+   Compiled to app/static/css/tailwind.css via `npm run build:css`.
+   ========================================================================== */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ base */
+@layer base {
+  [x-cloak] {
+    display: none !important;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface-950 text-slate-200 font-sans antialiased;
+  }
+
+  ::selection {
+    @apply bg-violet-500/40 text-white;
+  }
+
+  /* Slim, theme-matched scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a3352 transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full border-2 border-transparent bg-slate-700/80 bg-clip-content;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-600/90;
+  }
+
+  input[type="range"] {
+    @apply h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-800 outline-none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    @apply h-5 w-5 appearance-none rounded-full border-2 border-white/90 bg-violet-500 shadow-glow-soft transition-transform;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    @apply scale-110;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    @apply h-5 w-5 rounded-full border-2 border-white/90 bg-violet-500;
+  }
+
+  input[type="range"]:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+}
+
+/* ------------------------------------------------------------ components */
+@layer components {
+  /* ---- surfaces ---- */
+  .panel {
+    @apply rounded-3xl border border-slate-800/80 bg-surface-900/70 shadow-panel backdrop-blur-xl;
+  }
+
+  .panel-head {
+    @apply flex flex-wrap items-start justify-between gap-4 border-b border-slate-800/70 px-6 py-5;
+  }
+
+  .panel-body {
+    @apply p-6;
+  }
+
+  .section-title {
+    @apply text-base font-semibold tracking-tight text-slate-100;
+  }
+
+  .section-hint {
+    @apply mt-1 text-xs leading-relaxed text-slate-400;
+  }
+
+  /* ---- buttons ---- */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+      transition duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2
+      focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-gradient-to-r from-violet-600 via-violet-500 to-indigo-500 text-white shadow-glow
+      hover:brightness-110 hover:-translate-y-px active:translate-y-0;
+  }
+
+  .btn-ghost {
+    @apply btn border border-slate-700/80 bg-slate-800/40 text-slate-300 hover:border-violet-500/60 hover:text-white;
+  }
+
+  .btn-danger {
+    @apply btn border border-rose-500/30 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20;
+  }
+
+  .btn-icon {
+    @apply btn h-11 w-11 shrink-0 rounded-full p-0;
+  }
+
+  .btn-sm {
+    @apply rounded-lg px-3 py-1.5 text-xs;
+  }
+
+  /* ---- form controls ---- */
+  .label {
+    @apply mb-1.5 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-slate-700/80 bg-surface-950/70 px-3.5 py-2.5 text-sm text-slate-100
+      placeholder-slate-500 transition focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/25;
+  }
+
+  .input-file {
+    @apply w-full cursor-pointer rounded-xl border border-slate-700/80 bg-surface-950/70 px-3 py-2 text-xs text-slate-400
+      file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-violet-500/15 file:px-3 file:py-1.5
+      file:text-xs file:font-semibold file:text-violet-300 hover:file:bg-violet-500/25;
+  }
+
+  .check-row {
+    @apply flex cursor-pointer items-center gap-2.5 text-xs text-slate-400;
+  }
+
+  .check-row input[type="checkbox"] {
+    @apply h-4 w-4 cursor-pointer rounded border-slate-600 bg-surface-950 text-violet-500 focus:ring-violet-500/40;
+  }
+
+  /* ---- navigation ---- */
+  .tab {
+    @apply inline-flex items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-400
+      transition hover:bg-slate-800/60 hover:text-slate-200;
+  }
+
+  .tab-active {
+    @apply bg-gradient-to-r from-violet-600/90 to-indigo-500/90 text-white shadow-glow hover:text-white;
+  }
+
+  /* ---- chips & badges ---- */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider;
+  }
+
+  .chip-neutral {
+    @apply chip bg-slate-800/80 text-slate-400;
+  }
+
+  .chip-brand {
+    @apply chip bg-violet-500/15 text-violet-300;
+  }
+
+  .chip-ok {
+    @apply chip bg-emerald-500/15 text-emerald-300;
+  }
+
+  .chip-warn {
+    @apply chip bg-amber-500/15 text-amber-300;
+  }
+
+  .chip-danger {
+    @apply chip bg-rose-500/15 text-rose-300;
+  }
+
+  .badge-dot {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-slate-700/70 bg-slate-800/50 px-2.5 py-1 text-[11px] font-medium text-slate-400;
+  }
+
+  /* ---- progress ---- */
+  .progress-track {
+    @apply h-1.5 w-full overflow-hidden rounded-full bg-slate-800;
+  }
+
+  .progress-bar {
+    @apply h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 transition-[width] duration-500 ease-out;
+  }
+
+  .progress-bar-failed {
+    @apply h-full rounded-full bg-gradient-to-r from-rose-500 to-red-400 transition-[width] duration-500;
+  }
+
+  .progress-bar-done {
+    @apply h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-400 transition-[width] duration-500;
+  }
+
+  /* ---- pipeline stage tiles ---- */
+  .stage-tile {
+    @apply rounded-xl border px-3 py-2.5 transition;
+  }
+
+  .stage-idle {
+    @apply stage-tile border-slate-800 bg-surface-950/40 text-slate-500;
+  }
+
+  .stage-active {
+    @apply stage-tile border-violet-500/60 bg-violet-500/10 text-violet-200 shadow-glow-soft;
+  }
+
+  .stage-done {
+    @apply stage-tile border-emerald-500/40 bg-emerald-500/10 text-emerald-200;
+  }
+
+  /* ---- dropzone ---- */
+  .dropzone {
+    @apply relative flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed
+      border-slate-700 bg-surface-950/40 px-6 py-8 text-center transition;
+  }
+
+  .dropzone-active {
+    @apply border-violet-500 bg-violet-500/10;
+  }
+
+  /* ---- toasts ---- */
+  .toast {
+    @apply pointer-events-auto flex w-full gap-3 rounded-2xl border border-slate-700/80 bg-surface-850/95 p-3.5
+      text-sm shadow-panel backdrop-blur-xl animate-fade-up;
+  }
+
+  .toast-success {
+    @apply toast border-emerald-500/40;
+  }
+
+  .toast-error {
+    @apply toast border-rose-500/40;
+  }
+
+  .toast-info {
+    @apply toast border-violet-500/40;
+  }
+
+  /* ---- timeline ---- */
+  .timeline-cue {
+    @apply absolute top-0 h-full overflow-hidden rounded-md px-1 text-left text-[10px] font-medium text-white/90
+      transition hover:brightness-125;
+  }
+}
+
+/* ------------------------------------------------------------- utilities */
+@layer utilities {
+  .glass-line {
+    @apply border-t border-slate-800/80;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-violet-300 via-violet-200 to-indigo-300 bg-clip-text text-transparent;
+  }
+
+  .scroll-fade {
+    mask-image: linear-gradient(to bottom, transparent, black 6%, black 94%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

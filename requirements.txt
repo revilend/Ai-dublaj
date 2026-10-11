@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# Core web stack — required to boot the API server and serve the studio UI.
+# ---------------------------------------------------------------------------
+fastapi>=0.111,<1.0
+uvicorn[standard]>=0.30,<1.0
+python-multipart>=0.0.9
+jinja2>=3.1.4
+aiofiles>=23.2.1
+websockets>=12.0
+python-dotenv>=1.0.1
+
+# ---------------------------------------------------------------------------
+# Data layer
+# ---------------------------------------------------------------------------
+SQLAlchemy>=2.0.30,<3.0
+pydantic>=2.7,<3.0
+pydantic-settings>=2.2.1,<3.0
+
+# ---------------------------------------------------------------------------
+# NOTE
+# The heavy local AI runtime (Coqui XTTS-v2 / PyTorch / Whisper / Demucs /
+# NLLB translation) lives in `requirements-ai.txt` on purpose: the API server
+# must boot on machines without a GPU or with a slow connection to PyPI.
+#
+# Every AI engine is lazily imported and degrades gracefully — check
+# `GET /api/system/capabilities` to see what is available on the host.
+# ---------------------------------------------------------------------------

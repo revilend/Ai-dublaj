@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="{{ app_description }}" />
+    <title>{{ app_name }} — AI Voice Cloning &amp; Dubbing Studio</title>
+    <link rel="stylesheet" href="/static/css/tailwind.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%238b5cf6'><path d='M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z'/><path d='M5 11a1 1 0 1 0-2 0 9 9 0 0 0 8 8.94V22a1 1 0 1 0 2 0v-2.06A9 9 0 0 0 21 11a1 1 0 1 0-2 0 7 7 0 1 1-14 0Z'/></svg>" />
+  </head>
+
+  <body x-data="studio()" x-init="init()" class="min-h-screen">
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Ambient background                                               -->
+    <!-- ---------------------------------------------------------------- -->
+    <div class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      <div class="absolute inset-0 bg-studio-grid bg-grid opacity-70"></div>
+      <div class="absolute -left-40 -top-48 h-[36rem] w-[36rem] rounded-full bg-violet-600/25 blur-[130px] animate-drift"></div>
+      <div class="absolute -right-32 top-16 h-[30rem] w-[30rem] rounded-full bg-indigo-500/20 blur-[130px] animate-drift"></div>
+      <div class="absolute bottom-0 left-1/3 h-[22rem] w-[22rem] rounded-full bg-fuchsia-600/10 blur-[120px]"></div>
+    </div>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Header                                                           -->
+    <!-- ---------------------------------------------------------------- -->
+    <header class="sticky top-0 z-30 border-b border-slate-800/70 bg-surface-950/80 backdrop-blur-xl">
+      <div class="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-5 py-3.5 lg:px-8">
+        <div class="flex items-center gap-3.5">
+          <div class="grid h-11 w-11 place-items-center rounded-2xl border border-violet-500/30 bg-gradient-to-br from-violet-600/25 to-indigo-500/20 text-violet-300 shadow-glow-soft">
+            <i data-lucide="audio-waveform" class="h-5 w-5"></i>
+          </div>
+          <div class="leading-tight">
+            <p class="text-[15px] font-bold tracking-tight text-slate-50">{{ app_name }}</p>
+            <p class="text-[11px] text-slate-400">Local voice cloning &amp; video dubbing</p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5">
+          <template x-for="badge in capabilityBadges" :key="badge.key">
+            <span class="badge-dot" :title="badge.detail">
+              <span class="h-1.5 w-1.5 rounded-full" :class="badge.ok ? 'bg-emerald-400' : 'bg-slate-500'"></span>
+              <span x-text="badge.label"></span>
+            </span>
+          </template>
+          <a href="/docs" target="_blank" rel="noreferrer"
+             class="badge-dot border-violet-500/40 text-violet-300 hover:text-violet-200">
+            <i data-lucide="book-open" class="h-3.5 w-3.5"></i>
+            <span>API docs</span>
+          </a>
+          <span class="badge-dot border-amber-500/40 text-amber-200" x-show="staticPreview" x-cloak
+                title="This is a static build with no API host configured. Set VOX_API_BASE to reach a running backend.">
+            <i data-lucide="plug-zap" class="h-3.5 w-3.5"></i>
+            <span>Static preview — no backend</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="mx-auto max-w-[1600px] px-5 lg:px-8">
+        <nav class="-mb-px flex gap-1.5 overflow-x-auto pb-3" role="tablist">
+          <button type="button" class="tab" :class="{ 'tab-active': tab === 'voice' }" @click="tab = 'voice'">
+            <i data-lucide="wand-sparkles" class="h-4 w-4"></i><span>Voice Studio</span>
+          </button>
+          <button type="button" class="tab" :class="{ 'tab-active': tab === 'dubbing' }" @click="tab = 'dubbing'">
+            <i data-lucide="film" class="h-4 w-4"></i><span>Dubbing Studio</span>
+          </button>
+          <button type="button" class="tab" :class="{ 'tab-active': tab === 'library' }" @click="tab = 'library'">
+            <i data-lucide="library" class="h-4 w-4"></i><span>Voice Library</span>
+            <span class="chip-neutral !px-1.5 !py-0.5 !text-[10px]" x-text="voices.length"></span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-[1600px] px-5 py-6 lg:px-8">
+      <!-- =============================================================== -->
+      <!-- 1. VOICE STUDIO                                                  -->
+      <!-- =============================================================== -->
+      <section x-show="tab === 'voice'" x-cloak class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <!-- ---------------- input ---------------- -->
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="section-title">Clone a voice</h2>
+              <p class="section-hint">Pick a saved persona, record a new sample, or drop an audio file — then type what it should say.</p>
+            </div>
+          </div>
+
+          <div class="panel-body space-y-6">
+            <!-- reference source -->
+            <div class="space-y-3">
+              <p class="label">Reference voice</p>
+
+              <div class="grid gap-2 sm:grid-cols-3">
+                <button type="button" class="btn-ghost btn-sm" :class="{ '!border-violet-500 !text-white': voiceSource === 'library' }" @click="voiceSource = 'library'">
+                  <i data-lucide="library" class="h-3.5 w-3.5"></i><span>Library</span>
+                </button>
+                <button type="button" class="btn-ghost btn-sm" :class="{ '!border-violet-500 !text-white': voiceSource === 'recording' }" @click="voiceSource = 'recording'">
+                  <i data-lucide="mic" class="h-3.5 w-3.5"></i><span>Microphone</span>
+                </button>
+                <button type="button" class="btn-ghost btn-sm" :class="{ '!border-violet-500 !text-white': voiceSource === 'upload' }" @click="voiceSource = 'upload'">
+                  <i data-lucide="upload" class="h-3.5 w-3.5"></i><span>Upload</span>
+                </button>
+              </div>
+
+              <!-- library selector -->
+              <div x-show="voiceSource === 'library'" x-cloak>
+                <select class="input" x-model="selectedVoiceId">
+                  <option value="">Select a saved voice…</option>
+                  <template x-for="voice in voices" :key="voice.id">
+                    <option :value="String(voice.id)" x-text="`${voice.name} · ${voice.language}`"></option>
+                  </template>
+                </select>
+                <p class="mt-2 text-[11px] text-slate-500" x-show="!voices.length">
+                  No saved voices yet — record or upload one, then save it from the Voice Library tab.
+                </p>
+              </div>
+
+              <!-- microphone recorder -->
+              <div x-show="voiceSource === 'recording'" x-cloak class="rounded-2xl border border-slate-800 bg-surface-950/40 p-4">
+                <div class="flex items-center gap-4">
+                  <button type="button" @click="recording ? stopRecording() : startRecording()"
+                          class="relative grid h-14 w-14 shrink-0 place-items-center rounded-full transition"
+                          :class="recording ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-gradient-to-br from-violet-600 to-indigo-500 text-white shadow-glow'">
+                    <span x-show="recording" x-cloak class="absolute inset-0 rounded-full bg-rose-500/30 animate-pulse-ring"></span>
+                    <span x-show="!recording"><i data-lucide="mic" class="h-5 w-5"></i></span>
+                    <span x-show="recording" x-cloak><i data-lucide="square" class="h-4 w-4"></i></span>
+                  </button>
+
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="font-semibold text-slate-300" x-text="recording ? 'Recording…' : (reference.kind === 'recording' ? 'Recording ready' : 'Tap to record')"></span>
+                      <span class="font-mono text-slate-400" x-text="formatClock(recSeconds)"></span>
+                    </div>
+                    <canvas data-viz class="mt-2 h-14 w-full rounded-xl bg-surface-950/60"></canvas>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <button type="button" class="btn-ghost btn-sm" x-show="reference.kind === 'recording' && reference.url" x-cloak @click="toggleReferencePlayback()">
+                    <span x-show="!referencePlaying"><i data-lucide="play" class="h-3.5 w-3.5"></i></span>
+                    <span x-show="referencePlaying" x-cloak><i data-lucide="pause" class="h-3.5 w-3.5"></i></span>
+                    <span x-text="referencePlaying ? 'Pause' : 'Play sample'"></span>
+                  </button>
+                  <button type="button" class="btn-ghost btn-sm" x-show="reference.kind === 'recording'" x-cloak @click="clearReference()">
+                    <i data-lucide="trash-2" class="h-3.5 w-3.5"></i><span>Discard</span>
+                  </button>
+                  <span class="text-[11px] text-slate-500">6–30 seconds of clean speech works best.</span>
+                </div>
+              </div>
+
+              <!-- drag & drop uploader -->
+              <div x-show="voiceSource === 'upload'" x-cloak>
+                <div class="dropzone"
+                     :class="{ 'dropzone-active': dragging }"
+                     @dragenter.prevent="startDrag('dragging')"
+                     @dragover.prevent
+                     @dragleave.prevent="endDrag('dragging')"
+                     @drop.prevent="handleDrop($event)"
+                     @click="$refs.referenceFile.click()">
+                  <span><i data-lucide="cloud-upload" class="h-7 w-7 text-violet-300"></i></span>
+                  <p class="text-sm font-medium text-slate-300">Drop an audio file here</p>
+                  <p class="text-[11px] text-slate-500">wav · mp3 · flac · ogg · m4a · aac · opus · webm — or click to browse</p>
+                  <p class="mt-1 text-[11px] font-semibold text-violet-300" x-show="reference.kind === 'upload'" x-cloak x-text="reference.name"></p>
+                </div>
+                <input type="file" x-ref="referenceFile" class="hidden" accept="audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.webm" @change="handleFileInput($event)" />
+              </div>
+            </div>
+
+            <!-- text + language -->
+            <div>
+              <div class="label">
+                <span>Script</span>
+                <span class="font-mono text-[11px] normal-case tracking-normal text-slate-500">
+                  <span x-text="wordCount"></span> words · <span x-text="text.length"></span>/5000
+                </span>
+              </div>
+              <textarea class="input min-h-[130px] resize-y" maxlength="5000"
+                        x-model="text"
+                        placeholder="Salom! Bu butunlay lokal AI ovoz klonlash studiyasi."></textarea>
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p class="label"><span>Language</span></p>
+                <select class="input" x-model="language">
+                  <optgroup label="Available with XTTS-v2">
+                    <template x-for="item in languages" :key="item.code">
+                      <option :value="item.code" x-text="item.name"></option>
+                    </template>
+                  </optgroup>
+                  <optgroup label="Not available with XTTS-v2" x-show="unsupportedLanguages.length" x-cloak>
+                    <template x-for="item in unsupportedLanguages" :key="item.code">
+                      <option :value="item.code" disabled x-text="`${item.name} (model unavailable)`"></option>
+                    </template>
+                  </optgroup>
+                </select>
+              </div>
+              <div>
+                <p class="label"><span>Download format</span></p>
+                <select class="input" x-model="format">
+                  <option value="wav">WAV — lossless</option>
+                  <option value="mp3">MP3 — needs ffmpeg</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- sliders -->
+            <div class="grid gap-5 sm:grid-cols-2">
+              <div>
+                <div class="label">
+                  <span>Speed</span>
+                  <span class="font-mono text-[11px] normal-case tracking-normal text-violet-300" x-text="`${Number(speed).toFixed(2)}×`"></span>
+                </div>
+                <input type="range" min="0.5" max="2" step="0.05" x-model.number="speed" />
+                <div class="mt-1 flex justify-between text-[10px] text-slate-500"><span>0.5×</span><span>1.0×</span><span>2.0×</span></div>
+              </div>
+              <div>
+                <div class="label">
+                  <span>Pitch</span>
+                  <span class="font-mono text-[11px] normal-case tracking-normal text-violet-300" x-text="`${pitch > 0 ? '+' : ''}${Number(pitch).toFixed(1)} st`"></span>
+                </div>
+                <input type="range" min="-12" max="12" step="0.5" x-model.number="pitch" />
+                <div class="mt-1 flex justify-between text-[10px] text-slate-500"><span>-12 st</span><span>0</span><span>+12 st</span></div>
+              </div>
+            </div>
+
+            <label class="check-row">
+              <input type="checkbox" x-model="normalize" />
+              <span>Normalise loudness (EBU R128)</span>
+            </label>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="button" class="btn-primary" :disabled="synthesizing || !canSynthesize" @click="generate()">
+                <span x-show="!synthesizing"><i data-lucide="sparkles" class="h-4 w-4"></i></span>
+                <span x-show="synthesizing" x-cloak class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+                <span x-text="synthesizing ? 'Cloning voice…' : 'Generate speech'"></span>
+              </button>
+              <p class="text-[11px] text-slate-500" x-show="!canSynthesize" x-cloak x-text="blockedReason"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------------- output ---------------- -->
+        <div class="space-y-6">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title">Generated audio</h2>
+                <p class="section-hint" x-text="statusMessage || 'Nothing synthesised yet.'"></p>
+              </div>
+              <span class="chip-brand" x-show="result" x-cloak x-text="result ? `${result.output_format?.toUpperCase()} · ${formatClock(result.duration_seconds)}` : ''"></span>
+            </div>
+
+            <div class="panel-body space-y-5">
+              <div class="progress-track">
+                <div :class="progressClass(taskStatus)" :style="`width: ${taskProgress}%`"></div>
+              </div>
+
+              <div x-ref="waveform" class="overflow-hidden rounded-2xl border border-slate-800 bg-surface-950/50 p-3"></div>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <button type="button" class="btn-primary btn-icon" :disabled="!waveReady" @click="togglePlayback()">
+                  <span x-show="!playing"><i data-lucide="play" class="h-4 w-4"></i></span>
+                  <span x-show="playing" x-cloak><i data-lucide="pause" class="h-4 w-4"></i></span>
+                </button>
+                <span class="font-mono text-xs text-slate-400" x-text="`${formatClock(playhead)} / ${formatClock(waveDuration)}`"></span>
+
+                <div class="ml-auto flex flex-wrap gap-2">
+                  <a class="btn-primary btn-sm" :href="mediaUrl(result?.audio_url) || '#'" :download="downloadName" :class="{ 'pointer-events-none opacity-40': !result }">
+                    <i data-lucide="download" class="h-3.5 w-3.5"></i>
+                    <span x-text="result ? `Download ${result.output_format?.toUpperCase()}` : 'Download'"></span>
+                  </a>
+                  <button type="button" class="btn-ghost btn-sm" :disabled="!result" @click="copyResultPath()">
+                    <i data-lucide="copy" class="h-3.5 w-3.5"></i><span>Copy path</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid gap-2 border-t border-slate-800/70 pt-4 sm:grid-cols-2" x-show="result" x-cloak>
+                <div class="flex justify-between text-xs"><span class="text-slate-500">Voice</span><span class="font-mono text-slate-300" x-text="resultVoiceLabel"></span></div>
+                <div class="flex justify-between text-xs"><span class="text-slate-500">Language</span><span class="font-mono text-slate-300" x-text="result?.language"></span></div>
+                <div class="flex justify-between text-xs"><span class="text-slate-500">Chunks</span><span class="font-mono text-slate-300" x-text="result?.chunks"></span></div>
+                <div class="flex justify-between text-xs"><span class="text-slate-500">Duration</span><span class="font-mono text-slate-300" x-text="formatClock(result?.duration_seconds)"></span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- engine status -->
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title">Local engines</h2>
+                <p class="section-hint">Everything runs on this machine — no external API keys.</p>
+              </div>
+              <span class="chip-neutral" x-text="capabilities?.device === 'cuda' ? 'GPU' : 'CPU'"></span>
+            </div>
+            <div class="panel-body grid gap-2.5 sm:grid-cols-2">
+              <template x-for="item in capabilityList" :key="item.key">
+                <div class="flex items-center justify-between rounded-xl border border-slate-800/70 bg-surface-950/40 px-3 py-2">
+                  <span class="text-xs text-slate-400" x-text="item.label"></span>
+                  <span class="chip" :class="item.ok ? 'chip-ok' : 'chip-neutral'" x-text="item.ok ? 'ready' : 'missing'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- 2. DUBBING STUDIO                                                -->
+      <!-- =============================================================== -->
+      <section x-show="tab === 'dubbing'" x-cloak class="space-y-6" @keydown="onEditorKeydown($event)">
+
+        <!-- project toolbar -->
+        <div class="panel">
+          <div class="flex flex-wrap items-end gap-3 p-4">
+            <div class="min-w-[240px] flex-1">
+              <label class="label"><span>Dubbing project</span></label>
+              <select class="input" :value="selectedProject?.id ?? ''" @change="selectProject(Number($event.target.value))">
+                <option value="">Select a project…</option>
+                <template x-for="project in projects" :key="project.id">
+                  <option :value="project.id" x-text="`${project.title} · ${project.status}`"></option>
+                </template>
+              </select>
+            </div>
+            <button type="button" class="btn-ghost btn-sm" @click="loadProjects()">
+              <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i><span>Refresh</span>
+            </button>
+            <button type="button" class="btn-primary btn-sm" @click="createOpen = !createOpen">
+              <i data-lucide="plus" class="h-3.5 w-3.5"></i><span>New project</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- new project (collapsible) -->
+        <div class="panel h-fit" x-show="createOpen" x-cloak>
+          <div class="panel-head">
+            <div>
+              <h2 class="section-title">New dubbing project</h2>
+              <p class="section-hint">Upload a video. The pipeline extracts audio, transcribes, translates, clones the voice and muxes it back.</p>
+            </div>
+            <button type="button" class="btn-ghost btn-icon !h-9 !w-9" @click="createOpen = false">
+              <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+          </div>
+          <div class="panel-body space-y-5">
+            <div>
+              <p class="label"><span>Title</span></p>
+              <input type="text" class="input" maxlength="200" x-model="newProject.title" placeholder="Episode 01 — intro" />
+            </div>
+
+            <div>
+              <p class="label"><span>Source video</span></p>
+              <div class="dropzone"
+                   :class="{ 'dropzone-active': draggingVideo }"
+                   @dragenter.prevent="startDrag('draggingVideo')"
+                   @dragover.prevent
+                   @dragleave.prevent="endDrag('draggingVideo')"
+                   @drop.prevent="handleVideoDrop($event)"
+                   @click="$refs.videoFile.click()">
+                <span><i data-lucide="file-video" class="h-6 w-6 text-violet-300"></i></span>
+                <p class="text-sm font-medium text-slate-300" x-text="newProject.file ? newProject.file.name : 'Drop a video here'"></p>
+                <p class="text-[11px] text-slate-500">mp4 · mov · mkv · webm · avi · m4v</p>
+              </div>
+              <input type="file" x-ref="videoFile" class="hidden" accept="video/*,.mp4,.mov,.mkv,.webm,.avi,.m4v" @change="handleVideoInput($event)" />
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p class="label"><span>Source language</span></p>
+                <select class="input" x-model="newProject.sourceLanguage">
+                  <option value="auto">Auto-detect</option>
+                  <template x-for="item in languages" :key="item.code">
+                    <option :value="item.code" x-text="item.name"></option>
+                  </template>
+                </select>
+              </div>
+              <div>
+                <p class="label"><span>Target language</span></p>
+                <select class="input" x-model="newProject.targetLanguage">
+                  <template x-for="item in languages" :key="item.code">
+                    <option :value="item.code" x-text="item.name"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <p class="label"><span>Voice profile <em class="font-normal normal-case tracking-normal text-slate-500">optional</em></span></p>
+              <select class="input" x-model="newProject.voiceProfileId">
+                <option value="">Choose before rendering…</option>
+                <template x-for="voice in voices" :key="voice.id">
+                  <option :value="String(voice.id)" x-text="`${voice.name} · ${voice.language}`"></option>
+                </template>
+              </select>
+            </div>
+
+            <label class="check-row">
+              <input type="checkbox" x-model="newProject.analyze" />
+              <span>Run analysis now — separate music &amp; transcribe</span>
+            </label>
+
+            <button type="button" class="btn-primary w-full" :disabled="creatingProject || analyzing" @click="createProject()">
+              <span x-show="!creatingProject && !analyzing"><i data-lucide="plus" class="h-4 w-4"></i></span>
+              <span x-show="creatingProject || analyzing" x-cloak class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+              <span x-text="analyzing ? 'Analysing…' : 'Create project'"></span>
+            </button>
+
+            <div class="space-y-2" x-show="analyzing || analysisMessage" x-cloak>
+              <div class="progress-track"><div class="progress-bar" :style="`width: ${analysisProgress}%`"></div></div>
+              <p class="text-[11px] font-medium text-violet-200" x-text="analysisMessage || 'Working…'"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- empty state -->
+        <div class="panel" x-show="!selectedProject">
+          <div class="panel-body">
+            <p class="rounded-2xl border border-dashed border-slate-700 px-4 py-12 text-center text-sm text-slate-500"
+               x-text="projects.length ? 'Select a project above to open the dubbing studio.' : 'Upload a video to start dubbing.'"></p>
+          </div>
+        </div>
+
+        <!-- ============ studio: player | segment editor ============ -->
+        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]" x-show="selectedProject" x-cloak>
+
+          <!-- ---------------- LEFT: video player & controls ---------------- -->
+          <div class="space-y-6">
+            <div class="panel">
+              <div class="panel-head">
+                <div class="min-w-0">
+                  <h2 class="section-title truncate" x-text="selectedProject?.title"></h2>
+                  <p class="section-hint" x-text="`${selectedProject?.source_language} → ${selectedProject?.target_language}`"></p>
+                </div>
+                <span class="chip" :class="statusChipClass(selectedProject?.status)" x-text="selectedProject?.status"></span>
+              </div>
+
+              <div class="panel-body space-y-4">
+                <div class="relative" tabindex="0">
+                  <video x-ref="player"
+                         :src="mediaUrl(selectedProject?.video_url)"
+                         @loadedmetadata="onVideoLoaded($event)"
+                         @timeupdate="onVideoTimeUpdate($event)"
+                         @seeked="onVideoTimeUpdate($event)"
+                         @play="onVideoPlay()"
+                         @pause="onVideoPause()"
+                         controls preload="metadata" playsinline
+                         class="aspect-video w-full rounded-2xl border border-slate-800 bg-black"></video>
+                  <p class="absolute inset-x-0 bottom-14 text-center text-xs text-slate-500"
+                     x-show="!selectedProject?.video_url">No source video on this project.</p>
+                </div>
+
+                <!-- transport -->
+                <div class="flex flex-wrap items-center gap-2">
+                  <button type="button" class="btn-ghost btn-icon" title="Previous cue (Shift+Tab)" @click="stepSegment(-1)">
+                    <i data-lucide="skip-back" class="h-4 w-4"></i>
+                  </button>
+                  <button type="button" class="btn-primary btn-icon" :title="playerPlaying ? 'Pause (Space)' : 'Play (Space)'" @click="togglePlay()">
+                    <span x-show="!playerPlaying"><i data-lucide="play" class="h-4 w-4"></i></span>
+                    <span x-show="playerPlaying" x-cloak><i data-lucide="pause" class="h-4 w-4"></i></span>
+                  </button>
+                  <button type="button" class="btn-ghost btn-icon" title="Next cue (Tab)" @click="stepSegment(1)">
+                    <i data-lucide="skip-forward" class="h-4 w-4"></i>
+                  </button>
+                  <span class="font-mono text-xs text-slate-400" x-text="`${formatClock(playerTime)} / ${formatClock(playerDuration)}`"></span>
+                  <span class="chip-brand ml-auto" x-show="activeSegment" x-cloak
+                        x-text="`Cue ${activeSegmentIndex + 1} · ${formatRange(activeSegment)}`"></span>
+                  <span class="badge-dot ml-auto" x-show="!activeSegment" x-cloak>
+                    <i data-lucide="mouse-pointer-click" class="h-3 w-3"></i><span>Click a cue to jump</span>
+                  </span>
+                </div>
+
+                <p class="flex flex-wrap items-center gap-3 border-t border-slate-800/70 pt-3 text-[11px] text-slate-500">
+                  <span class="badge-dot"><i data-lucide="keyboard" class="h-3 w-3"></i><span>Space — play / pause</span></span>
+                  <span class="badge-dot"><i data-lucide="arrow-right" class="h-3 w-3"></i><span>Tab — next cue</span></span>
+                  <span class="badge-dot"><i data-lucide="arrow-left" class="h-3 w-3"></i><span>Shift+Tab — previous</span></span>
+                </p>
+              </div>
+            </div>
+
+            <!-- pipeline stages + actions -->
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="section-title">Pipeline</h2>
+                  <p class="section-hint" x-text="dubbingStatusText"></p>
+                </div>
+                <button type="button" class="btn-ghost btn-sm" @click="$refs.srtFile.click()">
+                  <i data-lucide="captions" class="h-3.5 w-3.5"></i><span>Upload SRT</span>
+                </button>
+                <input type="file" x-ref="srtFile" class="hidden" accept=".srt,.vtt" @change="uploadSubtitles($event)" />
+              </div>
+
+              <div class="panel-body space-y-4">
+                <div class="grid gap-2 sm:grid-cols-4">
+                  <div :class="stageClass(1)">
+                    <div class="flex items-center gap-1.5"><i data-lucide="music-4" class="h-3.5 w-3.5"></i><span class="text-[11px] font-semibold">1/4</span></div>
+                    <p class="mt-1 text-[11px] opacity-80">Separate music</p>
+                  </div>
+                  <div :class="stageClass(2)">
+                    <div class="flex items-center gap-1.5"><i data-lucide="captions" class="h-3.5 w-3.5"></i><span class="text-[11px] font-semibold">2/4</span></div>
+                    <p class="mt-1 text-[11px] opacity-80">Transcribe</p>
+                  </div>
+                  <div :class="stageClass(3)">
+                    <div class="flex items-center gap-1.5"><i data-lucide="mic" class="h-3.5 w-3.5"></i><span class="text-[11px] font-semibold">3/4</span></div>
+                    <p class="mt-1 text-[11px] opacity-80">Generate voices</p>
+                  </div>
+                  <div :class="stageClass(4)">
+                    <div class="flex items-center gap-1.5"><i data-lucide="clapperboard" class="h-3.5 w-3.5"></i><span class="text-[11px] font-semibold">4/4</span></div>
+                    <p class="mt-1 text-[11px] opacity-80">Render video</p>
+                  </div>
+                </div>
+
+                <div class="progress-track">
+                  <div :class="progressClass(selectedProject?.status)" :style="`width: ${selectedProject?.progress || 0}%`"></div>
+                </div>
+
+                <!-- cue map — every detected line, tinted once it has audio -->
+                <div>
+                  <p class="label"><span>Cue map</span><span class="font-mono text-[11px] normal-case tracking-normal text-slate-500" x-text="formatClock(projectDuration)"></span></p>
+                  <div class="relative h-9 overflow-hidden rounded-xl border border-slate-800 bg-surface-950/50">
+                    <template x-for="cue in timelineCues" :key="cue.id">
+                      <button type="button" class="timeline-cue"
+                              :class="[cue.hasAudio ? 'bg-gradient-to-r from-violet-600 to-indigo-500' : 'bg-slate-700/80', activeSegmentId === cue.id ? 'ring-2 ring-violet-300' : '']"
+                              :style="`left:${cue.left}%; width:${cue.width}%`"
+                              :title="cue.title"
+                              @click="seekToSegment(segments[cue.index - 1], cue.index - 1)">
+                        <span x-text="cue.index"></span>
+                      </button>
+                    </template>
+                    <p class="absolute inset-0 grid place-items-center text-[11px] text-slate-500" x-show="!timelineCues.length">
+                      No cues yet.
+                    </p>
+                  </div>
+                </div>
+
+                <p class="text-[11px] font-medium text-violet-200" x-show="analysisMessage" x-cloak x-text="analysisMessage"></p>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  <button type="button" class="btn-primary" :disabled="rendering || analyzing" @click="renderProject()">
+                    <span x-show="!rendering"><i data-lucide="clapperboard" class="h-4 w-4"></i></span>
+                    <span x-show="rendering" x-cloak class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+                    <span x-text="rendering ? 'Rendering…' : 'Render dubbed video'"></span>
+                  </button>
+
+                  <a class="btn-ghost" :href="mediaUrl(finalVideoUrl) || '#'" :download="`dubbed-${selectedProject?.id}.mp4`"
+                     :class="{ 'pointer-events-none opacity-40': !finalVideoUrl }">
+                    <i data-lucide="download" class="h-4 w-4"></i><span>Download final video</span>
+                  </a>
+                </div>
+
+                <div class="grid gap-2 border-t border-slate-800/70 pt-3 sm:grid-cols-3">
+                  <div class="flex justify-between text-xs"><span class="text-slate-500">Cues</span><span class="font-mono text-slate-300" x-text="segments.length"></span></div>
+                  <div class="flex justify-between text-xs"><span class="text-slate-500">Duration</span><span class="font-mono text-slate-300" x-text="formatClock(projectDuration)"></span></div>
+                  <div class="flex justify-between text-xs"><span class="text-slate-500">Dubbed audio</span><span class="font-mono text-slate-300" x-text="selectedProject?.dubbed_audio_url ? 'ready' : '—'"></span></div>
+                </div>
+
+                <div class="flex flex-wrap gap-2" x-show="selectedProject?.vocals_audio_url || selectedProject?.background_audio_url" x-cloak>
+                  <span class="chip-ok" x-show="selectedProject?.vocals_audio_url" x-cloak>vocals.wav</span>
+                  <span class="chip-ok" x-show="selectedProject?.background_audio_url" x-cloak>background.wav</span>
+                </div>
+
+                <div x-show="selectedProject?.final_video_url" x-cloak>
+                  <video :src="mediaUrl(selectedProject?.final_video_url)" controls preload="metadata" class="w-full rounded-2xl border border-slate-800 bg-black"></video>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ---------------- RIGHT: segment & translation editor ---------------- -->
+          <div class="panel flex min-h-0 flex-col">
+            <div class="panel-head">
+              <div class="min-w-0">
+                <h2 class="section-title">Subtitles &amp; translation</h2>
+                <p class="section-hint" x-text="segments.length ? `${segments.length} line(s) detected — click a row to jump the video.` : 'No lines yet.'"></p>
+              </div>
+              <button type="button" class="btn-ghost btn-sm" :disabled="translating || !segments.length" @click="autoTranslate()">
+                <span x-show="!translating"><i data-lucide="languages" class="h-3.5 w-3.5"></i></span>
+                <span x-show="translating" x-cloak class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+                <span x-text="translating ? 'Translating…' : 'Auto-translate'"></span>
+              </button>
+            </div>
+
+            <div class="min-h-0 flex-1 overflow-y-auto" x-ref="segmentList">
+              <table class="w-full text-left text-xs">
+                <thead class="sticky top-0 z-10 bg-surface-900/95 backdrop-blur text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th class="px-3 py-2.5">Time</th>
+                    <th class="px-3 py-2.5">Original</th>
+                    <th class="px-3 py-2.5 min-w-[200px]">Translation</th>
+                    <th class="px-3 py-2.5 min-w-[150px]">Voice</th>
+                    <th class="px-3 py-2.5">Preview</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(segment, index) in segments" :key="segment.id">
+                    <tr class="cursor-pointer border-t border-slate-800/70 align-top transition"
+                        :class="activeSegmentId === segment.id ? 'bg-violet-500/10' : 'hover:bg-slate-800/30'"
+                        :data-segment-id="segment.id"
+                        @click="seekToSegment(segment, index)">
+                      <td class="whitespace-nowrap px-3 py-2 font-mono text-[11px] text-slate-400" x-text="formatRange(segment)"></td>
+                      <td class="max-w-[220px] px-3 py-2 text-slate-300">
+                        <p class="line-clamp-2" x-text="segment.original_text || '—'"></p>
+                      </td>
+                      <td class="px-3 py-2" @click.stop>
+                        <input type="text" class="input py-1.5 text-xs text-violet-200"
+                               placeholder="Type a translation…"
+                               x-model="segment.translated_text"
+                               @change="saveSegmentText(segment)"
+                               @keydown.enter.prevent="saveSegmentText(segment)" />
+                      </td>
+                      <td class="px-3 py-2" @click.stop>
+                        <select class="input py-1.5 text-xs"
+                                :value="segment.voice_profile_id ? String(segment.voice_profile_id) : ''"
+                                @change="assignSegmentVoice(segment, $event.target.value)">
+                          <option value="">Project default</option>
+                          <template x-for="voice in voices" :key="voice.id">
+                            <option :value="String(voice.id)" x-text="voice.name"></option>
+                          </template>
+                        </select>
+                      </td>
+                      <td class="px-3 py-2" @click.stop>
+                        <div class="flex items-center gap-1.5">
+                          <button type="button" class="btn-ghost btn-sm gap-1.5" :disabled="previewingSegment === segment.id"
+                                  @click="previewLine(segment)"
+                                  title="Preview line" aria-label="Preview line">
+                            <span x-show="previewingSegment !== segment.id"><i data-lucide="audio-lines" class="h-3.5 w-3.5"></i></span>
+                            <span x-show="previewingSegment === segment.id" x-cloak class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+                            <span x-text="previewingSegment === segment.id ? 'Cloning…' : 'Preview line'"></span>
+                          </button>
+                          <button type="button" class="btn-ghost btn-sm" x-show="segment.dubbed_audio_url" x-cloak
+                                  :disabled="!segment.dubbed_audio_url" @click="playPreview(segment.dubbed_audio_url)"
+                                  title="Replay this line" aria-label="Replay this line">
+                            <i data-lucide="play" class="h-3.5 w-3.5"></i>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr x-show="!segments.length">
+                    <td colspan="5" class="px-3 py-10 text-center text-slate-500">
+                      No dialogue detected yet — let the analysis run, or upload an SRT/VTT.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- =============================================================== -->
+      <!-- 3. VOICE LIBRARY                                                 -->
+      <!-- =============================================================== -->
+      <section x-show="tab === 'library'" x-cloak class="space-y-6">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 class="section-title">Saved voice personas</h2>
+              <p class="section-hint">Each profile is a reference clip you can reuse for instant cloning and dubbing.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn-ghost btn-sm" @click="loadVoices()">
+                <i data-lucide="refresh-cw" class="h-3.5 w-3.5"></i><span>Refresh</span>
+              </button>
+              <button type="button" class="btn-primary btn-sm" @click="openVoiceModal()">
+                <i data-lucide="plus" class="h-3.5 w-3.5"></i><span>New voice</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" x-show="voices.length" x-cloak>
+              <template x-for="voice in voices" :key="voice.id">
+                <article class="rounded-2xl border border-slate-800 bg-surface-950/40 p-4 transition hover:border-violet-500/50">
+                  <div class="flex items-start gap-3">
+                    <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-violet-600 to-indigo-500 text-base font-bold text-white" x-text="initials(voice.name)"></div>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-semibold text-slate-100" x-text="voice.name"></p>
+                      <p class="line-clamp-2 text-[11px] text-slate-500" x-text="voice.description || 'No description'"></p>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 flex items-center gap-2">
+                    <span class="chip-neutral" x-text="voice.language"></span>
+                    <span class="chip-neutral" x-text="formatClock(voice.duration_seconds)"></span>
+                    <span class="chip-neutral" x-text="`#${voice.id}`"></span>
+                  </div>
+
+                  <audio class="mt-3 w-full" controls preload="none" :src="mediaUrl(voice.sample_audio_url)"></audio>
+
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button type="button" class="btn-ghost btn-sm" @click="useVoice(voice.id)">
+                      <i data-lucide="wand-sparkles" class="h-3.5 w-3.5"></i><span>Use in studio</span>
+                    </button>
+                    <button type="button" class="btn-danger btn-sm" @click="deleteVoice(voice)">
+                      <i data-lucide="trash-2" class="h-3.5 w-3.5"></i><span>Delete</span>
+                    </button>
+                  </div>
+                </article>
+              </template>
+            </div>
+
+            <p class="rounded-2xl border border-dashed border-slate-700 px-4 py-12 text-center text-sm text-slate-500" x-show="!voices.length">
+              No voices yet — record or upload a persona to get started.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- New voice modal                                                  -->
+    <!-- ---------------------------------------------------------------- -->
+    <div x-show="modalOpen" x-cloak class="fixed inset-0 z-50 grid place-items-center p-4">
+      <div class="absolute inset-0 bg-surface-950/80 backdrop-blur-sm" @click="closeVoiceModal()"></div>
+
+      <div class="panel relative w-full max-w-lg animate-fade-up">
+        <div class="panel-head">
+          <div>
+            <h2 class="section-title">New voice persona</h2>
+            <p class="section-hint">Record a fresh sample or upload a clip, then save it permanently.</p>
+          </div>
+          <button type="button" class="btn-ghost btn-icon !h-9 !w-9" @click="closeVoiceModal()">
+            <i data-lucide="x" class="h-4 w-4"></i>
+          </button>
+        </div>
+
+        <div class="panel-body space-y-5">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <p class="label"><span>Name</span></p>
+              <input type="text" class="input" maxlength="150" x-model="newVoice.name" placeholder="Narrator — warm male" />
+            </div>
+            <div>
+              <p class="label"><span>Language</span></p>
+              <select class="input" x-model="newVoice.language">
+                <template x-for="item in languages" :key="item.code">
+                  <option :value="item.code" x-text="item.name"></option>
+                </template>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <p class="label"><span>Description <em class="font-normal normal-case tracking-normal text-slate-500">optional</em></span></p>
+            <input type="text" class="input" maxlength="2000" x-model="newVoice.description" placeholder="Podcast intro voice, neutral tone" />
+          </div>
+
+          <div class="grid gap-2 sm:grid-cols-2">
+            <button type="button" class="btn-ghost btn-sm" :class="{ '!border-violet-500 !text-white': newVoice.mode === 'record' }" @click="newVoice.mode = 'record'">
+              <i data-lucide="mic" class="h-3.5 w-3.5"></i><span>Record</span>
+            </button>
+            <button type="button" class="btn-ghost btn-sm" :class="{ '!border-violet-500 !text-white': newVoice.mode === 'upload' }" @click="newVoice.mode = 'upload'">
+              <i data-lucide="upload" class="h-3.5 w-3.5"></i><span>Upload</span>
+            </button>
+          </div>
+
+          <div x-show="newVoice.mode === 'record'" x-cloak class="rounded-2xl border border-slate-800 bg-surface-950/40 p-4">
+            <div class="flex items-center gap-4">
+              <button type="button" @click="recording ? stopRecording() : startRecording()"
+                      class="relative grid h-12 w-12 shrink-0 place-items-center rounded-full transition"
+                      :class="recording ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-gradient-to-br from-violet-600 to-indigo-500 text-white'">
+                <span x-show="!recording"><i data-lucide="mic" class="h-5 w-5"></i></span>
+                <span x-show="recording" x-cloak><i data-lucide="square" class="h-4 w-4"></i></span>
+              </button>
+              <div class="flex-1">
+                <div class="flex justify-between text-xs">
+                  <span class="text-slate-300" x-text="recording ? 'Recording…' : 'Tap to record'"></span>
+                  <span class="font-mono text-slate-400" x-text="formatClock(recSeconds)"></span>
+                </div>
+                <canvas data-viz class="mt-2 h-12 w-full rounded-xl bg-surface-950/60"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <div x-show="newVoice.mode === 'upload'" x-cloak>
+            <div class="dropzone"
+                 :class="{ 'dropzone-active': dragging }"
+                 @dragenter.prevent="startDrag('dragging')"
+                 @dragover.prevent
+                 @dragleave.prevent="endDrag('dragging')"
+                 @drop.prevent="handleModalDrop($event)"
+                 @click="$refs.modalFile.click()">
+              <span><i data-lucide="cloud-upload" class="h-6 w-6 text-violet-300"></i></span>
+              <p class="text-sm text-slate-300" x-text="newVoice.file ? newVoice.file.name : 'Drop a reference clip'"></p>
+              <p class="text-[11px] text-slate-500">wav · mp3 · flac · ogg · m4a · aac · opus · webm</p>
+            </div>
+            <input type="file" x-ref="modalFile" class="hidden" accept="audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.webm" @change="handleModalFileInput($event)" />
+          </div>
+
+          <p class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200" x-show="modalError" x-cloak x-text="modalError"></p>
+
+          <div class="flex justify-end gap-2">
+            <button type="button" class="btn-ghost" @click="closeVoiceModal()">Cancel</button>
+            <button type="button" class="btn-primary" :disabled="savingVoice || !newVoice.name.trim()" @click="saveVoice()">
+              <span x-show="!savingVoice"><i data-lucide="check" class="h-4 w-4"></i></span>
+              <span x-show="savingVoice" x-cloak class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+              <span x-text="savingVoice ? 'Saving…' : 'Save persona'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------------------------------------------------------------- -->
+    <!-- Toasts                                                           -->
+    <!-- ---------------------------------------------------------------- -->
+    <div class="pointer-events-none fixed bottom-5 right-5 z-[60] flex w-[min(360px,90vw)] flex-col gap-2.5">
+      <template x-for="item in toasts" :key="item.id">
+        <div :class="toastClass(item.kind)">
+          <span :class="toastIconClass(item.kind)">
+            <i :data-lucide="item.icon"></i>
+          </span>
+          <div class="min-w-0 flex-1">
+            <p class="font-medium text-slate-200" x-text="item.message"></p>
+            <p class="mt-0.5 break-words font-mono text-[11px] text-slate-400" x-show="item.detail" x-text="item.detail"></p>
+          </div>
+          <button type="button" class="text-slate-500 hover:text-slate-300" @click="dismissToast(item.id)">
+            <i data-lucide="x" class="h-3.5 w-3.5"></i>
+          </button>
+        </div>
+      </template>
+    </div>
+
+    <footer class="mx-auto flex max-w-[1600px] flex-wrap justify-between gap-3 px-5 py-8 text-[11px] text-slate-600 lg:px-8">
+      <span>{{ app_name }} v{{ app_version }}</span>
+      <span>100% local · Coqui XTTS-v2 · faster-whisper · NLLB · Demucs · ffmpeg</span>
+    </footer>
+
+    <!--
+      All libraries are vendored — nothing is fetched from a CDN at runtime.
+      Load order matters: studio.js MUST execute before alpine.min.js, because
+      the Alpine CDN build calls Alpine.start() from a queueMicrotask that
+      drains once its own <script> finishes — i.e. before the *next* deferred
+      script runs. The component factory therefore has to exist first.
+    -->
+    <script src="/static/js/studio.js" defer></script>
+    <script src="/static/vendor/alpine.min.js" defer></script>
+    <script src="/static/vendor/lucide.min.js" defer></script>
+    <script src="/static/vendor/wavesurfer.min.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# Optional local AI runtime — 100% open-source, no paid APIs.
+#
+# Install with:
+#     pip install -r requirements-ai.txt
+#
+# For a CUDA 12.1 GPU build, install torch/torchaudio from the PyTorch index
+# *first* so pip does not pull the CPU wheels:
+#     pip install torch==2.1.2 torchaudio==2.1.2 \
+#         --index-url https://download.pytorch.org/whl/cu121
+#     pip install -r requirements-ai.txt
+#
+# The application detects CUDA at runtime and falls back to CPU automatically.
+# ---------------------------------------------------------------------------
+
+# --- neural TTS / voice cloning (Coqui XTTS-v2) ---
+torch>=2.1,<2.4
+torchaudio>=2.1,<2.4
+TTS>=0.22.0
+numpy>=1.24,<2.0
+soundfile>=0.12.1
+
+# --- speech-to-text (dubbing transcription) ---
+faster-whisper>=1.0.0
+
+# --- machine translation (NLLB-200) ---
+transformers>=4.40
+sentencepiece>=0.2.0
+sacremoses>=0.1.1
+
+# --- vocal / background separation ---
+demucs>=4.0.1
