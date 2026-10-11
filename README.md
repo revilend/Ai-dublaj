@@ -328,6 +328,42 @@ For the **full** dubbing engine, host the FastAPI app somewhere that runs Python
 and expose it with `VOX_API_BASE` (the Pages UI will drive it), or just run it
 locally.
 
+### Hugging Face Spaces (Gradio, phone-friendly)
+
+GitHub Pages cannot run Python, and Freebuff's managed hosting is a Node-only
+image — but a Hugging Face Space runs a real Python container, so the dubbing
+engine can live there for free and be driven entirely from a phone browser.
+`hf-space/` is a **two-file** Gradio build of the studio:
+
+| File | Purpose |
+| --- | --- |
+| `hf-space/app.py` | Gradio UI + the whole pipeline (XTTS-v2, faster-whisper, NLLB-200, ffmpeg) |
+| `hf-space/requirements.txt` | AI stack only — the Space image already ships Gradio and ffmpeg |
+| `hf-space/README.md` | Space card (YAML frontmatter) + usage notes |
+
+Deploying from a phone — no local machine, no git, no CLI:
+
+1. **huggingface.co → New → Space** → pick a name, SDK **Gradio**, hardware
+   **CPU basic (free)** → *Create Space*.
+2. Open the Space's **Files** tab → **Add file → Upload files**, and upload
+   `hf-space/app.py` **and** `hf-space/requirements.txt`. Both must land in the
+   **root** of the Space repo, not in a subfolder. Upload `hf-space/README.md`
+   too if you want the Space card (it replaces the generated one).
+3. Wait for the build (a few minutes — PyTorch is the big download), then open
+   the Space. Microphone recording works from a phone browser.
+
+The first request downloads XTTS-v2 (~1.9 GB) and NLLB-200 (~2.4 GB) into the
+container's **ephemeral** disk, so they are fetched again after a restart;
+`app.py` warms XTTS-v2 up in a background thread at startup to hide that cost.
+The free tier gives 2 vCPU, and a single video is capped at
+`VOX_MAX_VIDEO_SECONDS` (10 minutes by default) because CPU inference is roughly
+2–5 minutes per minute of footage. Two pieces of the full stack are deliberately
+left out of this build: **Demucs** background separation and **pyannote**
+diarization are far too slow for a free CPU container, so the dubbed voice
+replaces the original audio track, and there are no speaker labels. XTTS-v2 is
+licensed under **CPML** (non-commercial); `app.py` sets `COQUI_TOS_AGREED=1`,
+which records acceptance of that licence.
+
 ---
 
 ## Configuration

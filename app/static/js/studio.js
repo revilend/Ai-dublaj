@@ -10,13 +10,23 @@ const TEXT_LIMIT = 5000;
 const MAX_RECORDING_SECONDS = 120;
 
 /**
- * Base URL for the FastAPI backend.
+ * Base URL for the backend.
  *
- * Empty by default, which means "same origin" — the normal way the app runs.
- * A static deployment (e.g. GitHub Pages) has no backend, so it injects
- * `window.VOX_API_BASE` pointing at a hosted API instead.
+ * * `window.VOX_API_BASE` — injected at build time (the GitHub Pages export
+ *   writes the hosted backend here; the FastAPI template injects nothing).
+ * * Not injected, and served from a `*.github.io` host — fall back to the
+ *   hosted Hugging Face Space so the published site works out of the box.
+ * * Anything else (the FastAPI server, local dev) — same origin.
  */
-const API_BASE = String(window.VOX_API_BASE || "").replace(/\/+$/, "");
+const DEFAULT_API_BASE = "https://revilend-ai-dublaj.hf.space";
+
+function resolveApiBase() {
+  if (typeof window.VOX_API_BASE === "string") return window.VOX_API_BASE.replace(/\/+$/, "");
+  if (/(^|\.)github\.io$/.test(window.location.hostname)) return DEFAULT_API_BASE;
+  return "";
+}
+
+const API_BASE = resolveApiBase();
 
 const apiUrl = (path) => `${API_BASE}${path}`;
 
@@ -44,7 +54,241 @@ class ApiError extends Error {
   }
 }
 
+/* ------------------------------------------------------------------------ *
+ * Hugging Face Space (Gradio) adapter.
+ *
+ * A Gradio Space does not speak the FastAPI contract: it exposes
+ * `/gradio_api/call/<name>` behind a queue, not `/api/...`. When API_BASE
+ * points at one, translate the calls the studio actually needs (health,
+ * languages, and voice cloning) and answer everything else with an explicit,
+ * actionable error instead of a JSON-parse failure.
+ * ---------------------------------------------------------------------- */
+const GRADIO_CLONE = "clone_voice";
+const GRADIO_UNSUPPORTED =
+  "Bu Hugging Face Space faqat ovoz klonlashni taqim etadi (/clone_voice). " +
+  "Dublyaj, tarjima va ovoz kutubxonasi uchun FastAPI backend ishga tushirib, " +
+  "VOX_API_BASE ni o'zgartiring.";
+
+const gradioState = { info: null, tasks: new Map(), seq: 0 };
+
+/** Detect the Space and its named endpoints once per page load. */
+async function gradioInfo() {
+  if (gradioState.info) return gradioState.info;
+  if (!API_BASE) return null;
+  const response = await fetch(`${API_BASE}/gradio_api/info`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new ApiError(`Space javobi ${response.status}.`, response.status, "gradio_unavailable");
+  }
+  const payload = await response.json();
+  const endpoints = Object.keys(payload?.named_endpoints || {}).map((name) => name.replace(/^\//, ""));
+  if (!endpoints.length) {
+    throw new ApiError("Space'da hech qanday endpoint yo'q.", 503, "gradio_empty");
+  }
+  gradioState.info = { endpoints, has: (name) => endpoints.includes(name) };
+  return gradioState.info;
+}
+
+function absolutise(url) {
+  if (!url) return "";
+  if (/^(https?:|data:|blob:)/.test(url)) return url;
+  return `${API_BASE}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
+/** POST a file to the Space's upload queue and return its FileData stub. */
+async function gradioUpload(file) {
+  const form = new FormData();
+  form.append("files", file, file.name || "reference.webm");
+  const response = await fetch(`${API_BASE}/gradio_api/upload`, { method: "POST", body: form });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new ApiError(`Yuklashda xato: ${text.slice(0, 160)}`, response.status, "gradio_upload_failed");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new ApiError("Space javobini o'qib bo'lmadi.", 502, "gradio_bad_response");
+  }
+  const fileRef = Array.isArray(payload) ? payload[0] : payload;
+  if (!fileRef?.path) {
+    throw new ApiError("Space faylni qabul qilmadi.", 502, "gradio_bad_response");
+  }
+  return fileRef;
+}
+
+/** Queue one named Gradio event; resolves with the job's event id. */
+async function gradioCall(name, data) {
+  const response = await fetch(`${API_BASE}/gradio_api/call/${name}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new ApiError(`Space qo'ng'iroqni qabul qilmadi: ${text.slice(0, 160)}`, response.status, "gradio_call_failed");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new ApiError("Space javobini o'qib bo'lmadi.", 502, "gradio_bad_response");
+  }
+  if (!payload?.event_id) {
+    throw new ApiError("Space event_id qaytarmadi.", 502, "gradio_bad_response");
+  }
+  return payload.event_id;
+}
+
+/** Read the SSE stream Gradio sends back once the job finishes. */
+async function gradioResult(name, eventId) {
+  const response = await fetch(`${API_BASE}/gradio_api/call/${name}/${eventId}`, {
+    headers: { Accept: "text/event-stream" },
+  });
+  if (!response.ok) {
+    throw new ApiError(`Natijani olishda xato (${response.status}).`, response.status, "gradio_result_failed");
+  }
+  const body = await response.text();
+  const events = body
+    .split(/^event:\s*/m)
+    .slice(1)
+    .map((block) => {
+      const lines = block.split(/\r?\n/);
+      const dataLine = lines.find((line) => line.startsWith("data:"));
+      return { name: lines[0].trim(), data: dataLine ? dataLine.slice(5).trim() : "" };
+    });
+
+  const failed = events.find((event) => event.name === "error");
+  if (failed) throw new ApiError(failed.data || "Space xato qaytardi.", 500, "gradio_error");
+
+  const complete = events.filter((event) => event.name === "complete").pop();
+  if (!complete) {
+    throw new ApiError("Space ishni yakunlamadi.", 502, "gradio_no_complete");
+  }
+  try {
+    return JSON.parse(complete.data);
+  } catch {
+    throw new ApiError("Space natijasini o'qib bo'lmadi.", 502, "gradio_bad_response");
+  }
+}
+
+/** Translate one studio call onto the Space. */
+async function gradioRequest(path, { method = "GET", body } = {}, info) {
+  const route = path.split("?")[0];
+
+  if (route === "/api/system/capabilities") {
+    const clone = info.has(GRADIO_CLONE);
+    return {
+      gradio: true,
+      detail: `Hugging Face Space · ${info.endpoints.join(", ")}`,
+      tts: {
+        available: clone,
+        detail: clone ? "Space'da /clone_voice endpointi bor" : "Space'da ovoz klonlash yo'q",
+      },
+      transcription: { available: false, detail: GRADIO_UNSUPPORTED },
+      translation: { available: false, detail: GRADIO_UNSUPPORTED },
+      background_separation: { available: false, detail: GRADIO_UNSUPPORTED },
+    };
+  }
+
+  if (route === "/api/tts/languages") {
+    // The Space takes no language argument, so offering 17 languages would be
+    // a lie: one honest row is all the dropdown needs.
+    return { languages: [{ code: "auto", name: "Avtomatik (Space)" }], unsupported: [], default: "auto" };
+  }
+
+  if (route === "/api/voices" && method === "GET") return { items: [] };
+
+  if (route === "/api/tts/quick" && method === "POST") return gradioSynthesize(body, info);
+
+  const task = route.match(/^\/api\/tasks\/([^/]+)\/status$/);
+  if (task && task[1].startsWith("gradio-")) return gradioTaskStatus(task[1]);
+
+  if (route === "/api/dubbing" && method === "GET") return { items: [] };
+
+  throw new ApiError(GRADIO_UNSUPPORTED, 501, "gradio_unsupported");
+}
+
+/** Clone a voice on the Space and register a synthetic task for watchTask(). */
+async function gradioSynthesize(body, info) {
+  if (!info.has(GRADIO_CLONE)) {
+    throw new ApiError(GRADIO_UNSUPPORTED, 501, "gradio_unsupported");
+  }
+
+  const text = String(body?.get?.("text") || "").trim();
+  if (!text) throw new ApiError("Matn kiriting.", 400, "validation_error");
+  if (text.length > TEXT_LIMIT) {
+    throw new ApiError(`Matn juda uzun (${text.length} / ${TEXT_LIMIT}).`, 400, "validation_error");
+  }
+
+  const reference = body?.get?.("reference_audio");
+  if (!reference || typeof reference === "string") {
+    throw new ApiError(
+      "Space ovoz namunasi so'raydi — mikrofon bilan yozing yoki audio fayl yuklang.",
+      400,
+      "validation_error",
+    );
+  }
+
+  const fileRef = await gradioUpload(reference);
+  const eventId = await gradioCall(GRADIO_CLONE, [
+    text,
+    {
+      path: fileRef.path,
+      url: fileRef.url,
+      orig_name: fileRef.orig_name,
+      size: fileRef.size,
+      meta: { _type: "gradio.FileData" },
+    },
+  ]);
+
+  const taskId = `gradio-${++gradioState.seq}`;
+  const task = { started: Date.now() };
+  gradioState.tasks.set(taskId, task);
+  task.pending = gradioResult(GRADIO_CLONE, eventId).then(
+    (outputs) => {
+      const audio = Array.isArray(outputs) ? outputs[0] : outputs;
+      const note = Array.isArray(outputs) && typeof outputs[1] === "string" ? outputs[1] : "";
+      const url = absolutise(audio?.url || audio?.path || "");
+      if (!url) throw new ApiError("Space audio fayl qaytarmadi.", 502, "gradio_bad_response");
+      task.result = { audio_url: url, audio_path: url, gradio_status: note };
+    },
+    (error) => {
+      task.error = error?.message || String(error);
+    },
+  );
+
+  return { task_id: taskId, status: "running", message: "Space navbatga qo'yildi." };
+}
+
+/** Synthetic task snapshot so the existing progress UI keeps working. */
+function gradioTaskStatus(taskId) {
+  const task = gradioState.tasks.get(taskId);
+  if (!task) throw new ApiError("Vazifa topilmadi — sahifani yangilang.", 404, "not_found");
+  if (task.error) return { status: "failed", progress: 100, error: task.error, message: task.error };
+  if (task.result) {
+    return {
+      status: "completed",
+      progress: 100,
+      result: task.result,
+      message: task.result.gradio_status || "Synthesis complete.",
+    };
+  }
+  const seconds = (Date.now() - task.started) / 1000;
+  return {
+    status: "running",
+    progress: Math.min(0.92, 0.05 + seconds / 90),
+    message: `Space'da ishlab chiqilmoqda… ${Math.round(seconds)} s`,
+  };
+}
+
 async function apiRequest(path, { method = "GET", body, headers = {} } = {}) {
+  if (API_BASE) {
+    const info = await gradioInfo().catch(() => null);
+    if (info) return gradioRequest(path, { method, body }, info);
+  }
+
   const options = { method, headers: { ...headers } };
   if (body instanceof FormData) {
     options.body = body;
@@ -64,6 +308,17 @@ async function apiRequest(path, { method = "GET", body, headers = {} } = {}) {
     } catch {
       payload = text;
     }
+  }
+
+  if (response.ok && typeof payload === "string" && /^\s*<(!doctype|html)/i.test(payload)) {
+    // A 200 that is HTML is not an API (a typo'd host, a static site, …).
+    // Say so instead of handing the caller a string where JSON was expected.
+    throw new ApiError(
+      "Backend JSON emas, HTML qaytardi. API manzili to'g'rimi? " +
+        "FastAPI backend uchun VOX_API_BASE ni tekshiring.",
+      502,
+      "not_an_api",
+    );
   }
 
   if (!response.ok) {
@@ -123,6 +378,11 @@ function watchTask(taskId, onUpdate) {
 
     try {
       // Follow the API host: a static build may point at a remote backend.
+      // Synthetic Gradio tasks have no WebSocket — poll them instead.
+      if (String(taskId).startsWith("gradio-")) {
+        poll();
+        return;
+      }
       const target = API_BASE ? new URL(API_BASE) : window.location;
       const scheme = target.protocol === "https:" ? "wss" : "ws";
       socket = new WebSocket(`${scheme}://${target.host}/ws/tasks/${taskId}`);
@@ -162,6 +422,8 @@ function studio() {
     capabilitiesFailed: false,
     capabilityBadges: [],
     capabilityList: [],
+    /** True when API_BASE points at a Gradio Space instead of the FastAPI app. */
+    gradioBackend: false,
     languages: [],
     unsupportedLanguages: [],
 
@@ -472,14 +734,29 @@ function studio() {
         const capabilities = await apiRequest("/api/system/capabilities");
         this.capabilities = capabilities;
         this.capabilitiesFailed = false;
-        this.capabilityBadges = [
-          { key: "device", label: capabilities.device === "cuda" ? "GPU" : "CPU", ok: capabilities.device === "cuda", detail: capabilities.gpu?.detail },
-          { key: "ffmpeg", label: "ffmpeg", ok: capabilities.ffmpeg?.available, detail: capabilities.ffmpeg?.detail },
-          { key: "tts", label: "XTTS-v2", ok: capabilities.tts?.available, detail: capabilities.tts?.detail },
-          { key: "asr", label: "Whisper", ok: capabilities.transcription?.available, detail: capabilities.transcription?.detail },
-          { key: "mt", label: "NLLB", ok: capabilities.translation?.available, detail: capabilities.translation?.detail },
-          { key: "demucs", label: "Demucs", ok: capabilities.background_separation?.available, detail: capabilities.background_separation?.detail },
-        ];
+        if (capabilities.gradio) {
+          // A Hugging Face Space: it clones voices, and that is all it does.
+          const wasRest = this.gradioBackend === false;
+          this.gradioBackend = true;
+          const cloneReady = Boolean(capabilities.tts?.available);
+          this.capabilityBadges = [
+            { key: "api", label: "backend online", ok: true, detail: capabilities.detail },
+            { key: "tts", label: "XTTS klonlash", ok: cloneReady, detail: capabilities.tts?.detail },
+            { key: "asr", label: "Dublyaj (whisper)", ok: false, detail: capabilities.transcription?.detail },
+            { key: "mt", label: "Tarjima (NLLB)", ok: false, detail: capabilities.translation?.detail },
+          ];
+          if (wasRest) this.toast("Hugging Face Space ulandi", "success", capabilities.detail);
+        } else {
+          this.gradioBackend = false;
+          this.capabilityBadges = [
+            { key: "device", label: capabilities.device === "cuda" ? "GPU" : "CPU", ok: capabilities.device === "cuda", detail: capabilities.gpu?.detail },
+            { key: "ffmpeg", label: "ffmpeg", ok: capabilities.ffmpeg?.available, detail: capabilities.ffmpeg?.detail },
+            { key: "tts", label: "XTTS-v2", ok: capabilities.tts?.available, detail: capabilities.tts?.detail },
+            { key: "asr", label: "Whisper", ok: capabilities.transcription?.available, detail: capabilities.transcription?.detail },
+            { key: "mt", label: "NLLB", ok: capabilities.translation?.available, detail: capabilities.translation?.detail },
+            { key: "demucs", label: "Demucs", ok: capabilities.background_separation?.available, detail: capabilities.background_separation?.detail },
+          ];
+        }
         this.capabilityList = this.capabilityBadges.map((badge) => ({
           key: badge.key,
           label: badge.label,
@@ -491,7 +768,19 @@ function studio() {
         this.capabilityBadges = [{ key: "api", label: "backend offline", ok: false, detail: error.message }];
         this.capabilityList = [{ key: "api", label: "Backend", ok: false, detail: error.message }];
       }
+      this.applyGradioDefaults();
       this.$nextTick(refreshIcons);
+    },
+
+    /**
+     * The Space has no saved-voice library, so "choose a voice" would be a
+     * dead end: point the studio at the microphone/upload source instead.
+     */
+    applyGradioDefaults() {
+      if (!this.gradioBackend) return;
+      if (this.voiceSource === "library" && !this.selectedVoiceId && !this.voices.length) {
+        this.voiceSource = "upload";
+      }
     },
 
     async loadLanguages() {
@@ -524,6 +813,7 @@ function studio() {
       } catch (error) {
         this.toast("Could not load voices", "error", error.message);
       }
+      this.applyGradioDefaults();
       this.$nextTick(refreshIcons);
     },
 

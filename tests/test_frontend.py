@@ -8,6 +8,7 @@ it. Skipped when Node.js is not installed.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,6 +19,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HARNESS = PROJECT_ROOT / "tests" / "frontend_check.mjs"
 BOOT_HARNESS = PROJECT_ROOT / "tests" / "boot_check.mjs"
 STUDIO_JS = PROJECT_ROOT / "app" / "static" / "js" / "studio.js"
+BUILD_PAGES_MJS = PROJECT_ROOT / "scripts" / "build-pages.mjs"
+
+# The backend the GitHub Pages site ships with. It can be overridden at build
+# time with VOX_API_BASE (the hosted HF Space backend, when reachable).
+DEFAULT_HOSTED_API_BASE = "https://revilend-ai-dublaj.hf.space"
+
+
+def _declared_default_api_base(source: Path) -> str:
+    """Read a file's DEFAULT_API_BASE = "…" constant."""
+    match = re.search(
+        r'DEFAULT_API_BASE\s*=\s*[`"\']([^`"\']+)[`"\']',
+        source.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert match, f"{source.name} must declare DEFAULT_API_BASE"
+    return match.group(1)
+
 
 # boot_check.mjs exits with this code when it cannot find a running server
 BOOT_SKIP_EXIT_CODE = 3
@@ -145,21 +163,39 @@ def test_pages_export_is_static_and_self_contained() -> None:
     assert 'src="./static/js/studio.js"' in index
 
 
-def test_pages_export_without_a_backend_is_still_valid() -> None:
-    """With no VOX_API_BASE the export must still be a complete, honest shell."""
+def test_pages_export_defaults_to_the_hosted_backend() -> None:
+    """The published site must ship wired to the hosted backend.
+
+    GitHub Pages serves static files only, so the export bakes in the Hugging
+    Face Space by default (the VOX_API_BASE repository variable still wins).
+    Explicitly emptying the variable keeps the honest "static preview" shell
+    reachable, which is what the old behaviour asserted.
+    """
     node = shutil.which("node")
     if node is None:  # pragma: no cover - depends on the host
         pytest.skip("Node.js is not installed")
 
-    env = {key: value for key, value in os.environ.items() if key != "VOX_API_BASE"}
+    script = str(PROJECT_ROOT / "scripts" / "build-pages.mjs")
+    base_env = {key: value for key, value in os.environ.items() if key != "VOX_API_BASE"}
+
+    # 1. No VOX_API_BASE → the Hugging Face Space is baked in.
     result = subprocess.run(
-        [node, str(PROJECT_ROOT / "scripts" / "build-pages.mjs")],
-        cwd=str(PROJECT_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-        env=env,
+        [node, script],
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=120, check=False,
+        env=base_env,
+    )
+    assert result.returncode == 0, f"pages build failed:\n{result.stdout}\n{result.stderr}"
+
+    index = (PROJECT_ROOT / "pages" / "index.html").read_text(encoding="utf-8")
+    assert f'window.VOX_API_BASE = "{DEFAULT_HOSTED_API_BASE}"' in index
+    assert f'href="{DEFAULT_HOSTED_API_BASE}/docs"' in index
+    assert 'href="/docs"' not in index
+
+    # 2. An explicit empty value → the honest "no backend" shell.
+    result = subprocess.run(
+        [node, script],
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=120, check=False,
+        env={**base_env, "VOX_API_BASE": ""},
     )
     assert result.returncode == 0, f"pages build failed:\n{result.stdout}\n{result.stderr}"
 
@@ -167,6 +203,17 @@ def test_pages_export_without_a_backend_is_still_valid() -> None:
     assert 'window.VOX_API_BASE = ""' in index
     # Without a backend the API-docs link must not point at a dead route.
     assert 'href="/docs"' not in index
+
+
+def test_studio_and_builder_share_the_default_api_base() -> None:
+    """studio.js and the Pages builder must ship the same API origin.
+
+    studio.js falls back to its own DEFAULT_API_BASE when the page injects no
+    config, so the two copies of the hosted-backend URL must never drift apart.
+    """
+    from_studio = _declared_default_api_base(STUDIO_JS)
+    from_builder = _declared_default_api_base(BUILD_PAGES_MJS)
+    assert from_studio == from_builder == DEFAULT_HOSTED_API_BASE
 
 
 def test_pages_workflow_and_script_are_wired() -> None:
@@ -181,6 +228,9 @@ def test_pages_workflow_and_script_are_wired() -> None:
         "path: pages",
         "pages: write",
         "VOX_API_BASE",
+        # An unset repository variable arrives as ""; the workflow must unset
+        # it so the built-in Hugging Face Space default is used instead.
+        "unset VOX_API_BASE",
         # upload-pages-artifact v5+ excludes top-level dotfiles unless asked
         # not to, which would silently drop the .nojekyll marker.
         'include-hidden-files: "true"',

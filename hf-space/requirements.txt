@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# VoxStudio · Hugging Face Spaces (Gradio) runtime.
+#
+# The Space image already ships Python 3.10, Gradio and ffmpeg, so this file
+# only adds the AI stack. Hugging Face installs it with pip while building.
+#
+# Upload this file — together with app.py — to the ROOT of the Space repository.
+# ---------------------------------------------------------------------------
+
+# --- neural TTS / voice cloning (maintained Coqui fork, `TTS` is archived) ---
+# Since coqui-tts 0.27.4 PyTorch is NOT pulled in automatically, so torch and
+# torchaudio are pinned explicitly. The <2.7 ceiling keeps a pair that the fork
+# is known to work with instead of whatever lands next.
+coqui-tts>=0.27.4,<0.29
+torch>=2.2,<2.7
+torchaudio>=2.2,<2.7
+
+# --- speech-to-text (dubbing transcription) ---
+faster-whisper>=1.0,<2.0
+
+# --- machine translation (NLLB-200) ---
+transformers>=4.44
+sentencepiece>=0.2
+
+# --- audio I/O that app.py uses directly ---
+soundfile>=0.12.1
+numpy>=1.24,<3

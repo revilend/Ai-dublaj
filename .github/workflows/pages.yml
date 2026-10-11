@@ -9,10 +9,11 @@ name: Deploy studio UI to GitHub Pages
 # repository-admin rights, so it cannot be granted by this workflow's token.
 #
 # GitHub Pages cannot run the FastAPI backend (uvicorn, XTTS-v2, Demucs,
-# faster-whisper, ffmpeg), so this deploys the UI only. To connect it to a real
-# backend, set the repository variable VOX_API_BASE (Settings → Secrets and
-# variables → Actions → Variables) to the backend's public origin, e.g.
-# https://my-voxstudio.fly.dev — the page will then send its API calls there.
+# faster-whisper, ffmpeg), so this deploys the UI only. The export therefore
+# ships pointing at the hosted Hugging Face Space
+# (https://revilend-ai-dublaj.hf.space) and sends its API calls there. Set the
+# repository variable VOX_API_BASE (Settings → Secrets and variables → Actions
+# → Variables) to another backend's public origin to override it.
 
 on:
   push:
@@ -52,7 +53,12 @@ jobs:
       - name: Export the static site
         env:
           VOX_API_BASE: ${{ vars.VOX_API_BASE }}
-        run: npm run build:pages
+        run: |
+          # An unset repository variable arrives as an empty string, which the
+          # export would treat as "no backend". Unset it so the built-in
+          # default (the hosted Hugging Face Space) is baked in instead.
+          [ -n "$VOX_API_BASE" ] || unset VOX_API_BASE
+          npm run build:pages
 
       - name: Verify the export is a complete site
         run: |

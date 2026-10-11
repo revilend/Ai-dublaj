@@ -8,8 +8,9 @@
  *   • Jinja placeholders substituted for real values
  *   • root-absolute asset paths rewritten to relative ones (Pages serves a
  *     project site from `/<repo>/`, where `/static/...` would 404)
- *   • `window.VOX_API_BASE` injected, so the page can talk to a backend that is
- *     hosted elsewhere (set the VOX_API_BASE env var when building)
+ *   • `window.VOX_API_BASE` injected, so the page talks to the hosted backend
+ *     (the Hugging Face Space by default — override with the VOX_API_BASE env
+ *     var when building)
  *
  * Run with:  npm run build:pages
  */
@@ -20,7 +21,15 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "pages");
-const apiBase = String(process.env.VOX_API_BASE || "").replace(/\/+$/, "");
+
+//
+// The published site has no backend of its own, so it ships pointing at the
+// hosted Hugging Face Space. Set VOX_API_BASE (env, or the repository variable
+// of the same name that pages.yml passes through) to target another backend,
+// including `""` to render the honest "static preview" shell.
+//
+const DEFAULT_API_BASE = "https://revilend-ai-dublaj.hf.space";
+const apiBase = String(process.env.VOX_API_BASE ?? DEFAULT_API_BASE).replace(/\/+$/, "");
 
 /** Pull one string literal default out of app/core/config.py. */
 function configDefault(field, fallback) {
