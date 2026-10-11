@@ -181,6 +181,9 @@ def test_pages_workflow_and_script_are_wired() -> None:
         "path: pages",
         "pages: write",
         "VOX_API_BASE",
+        # upload-pages-artifact v5+ excludes top-level dotfiles unless asked
+        # not to, which would silently drop the .nojekyll marker.
+        'include-hidden-files: "true"',
     ):
         assert needle in text, f"{needle!r} missing from the Pages workflow"
 
